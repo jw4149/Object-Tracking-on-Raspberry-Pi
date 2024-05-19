@@ -53,17 +53,17 @@ def convert_bbox_to_z(bbox):
     return np.array([x, y, s, r]).reshape((4, 1))
 
 
-def convert_x_to_bbox(x, score=None):
+def convert_x_to_bbox(x, label):
     """
     Takes a bounding box in the centre form [x,y,s,r] and returns it in the form
       [x1,y1,x2,y2] where x1,y1 is the top left and x2,y2 is the bottom right
     """
     w = np.sqrt(x[2] * x[3])
     h = x[2] / w
-    if score == None:
+    if label == None:
         return np.array([x[0] - w / 2.0, x[1] - h / 2.0, x[0] + w / 2.0, x[1] + h / 2.0]).reshape((1, 4))
     else:
-        return np.array([x[0] - w / 2.0, x[1] - h / 2.0, x[0] + w / 2.0, x[1] + h / 2.0, score]).reshape((1, 5))
+        return np.array([x[0] - w / 2.0, x[1] - h / 2.0, x[0] + w / 2.0, x[1] + h / 2.0, label]).reshape((1, 5))
 
 
 class KalmanBoxTracker(object):
@@ -101,6 +101,7 @@ class KalmanBoxTracker(object):
         self.kf.Q[4:, 4:] *= 0.01
 
         self.kf.x[:4] = convert_bbox_to_z(bbox)
+        self.label = bbox[4]
         self.time_since_update = 0
         self.id = KalmanBoxTracker.count
         KalmanBoxTracker.count += 1
@@ -130,14 +131,14 @@ class KalmanBoxTracker(object):
         if self.time_since_update > 0:
             self.hit_streak = 0
         self.time_since_update += 1
-        self.history.append(convert_x_to_bbox(self.kf.x))
+        self.history.append(convert_x_to_bbox(self.kf.x.flatten(), self.label))
         return self.history[-1]
 
     def get_state(self):
         """
         Returns the current bounding box estimate.
         """
-        return convert_x_to_bbox(self.kf.x)
+        return convert_x_to_bbox(self.kf.x.flatten(), self.label)
 
 
 def associate_detections_to_trackers(detections, trackers, iou_threshold=0.3):
@@ -194,7 +195,7 @@ class Sort(object):
         self.trackers = []
         self.frame_count = 0
 
-    def update(self, dets=np.empty((0, 5))):
+    def update(self, dets):
         """
         Params:
           dets - a numpy array of detections in the format [[x,y,w,h,score],[x,y,w,h,score],...]
@@ -209,7 +210,7 @@ class Sort(object):
         ret = []
         for t, trk in enumerate(trks):
             pos = self.trackers[t].predict()[0]
-            trk[:] = [pos[0], pos[1], pos[2], pos[3], 0]
+            trk[:] = [pos[0], pos[1], pos[2], pos[3], pos[4]]
             if np.any(np.isnan(pos)):
                 to_del.append(t)
         trks = np.ma.compress_rows(np.ma.masked_invalid(trks))
@@ -236,4 +237,4 @@ class Sort(object):
                 self.trackers.pop(i)
         if len(ret) > 0:
             return np.concatenate(ret)
-        return np.empty((0, 5))
+        return np.empty((0, 6))

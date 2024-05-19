@@ -5,6 +5,7 @@ import time
 
 import numpy as np
 from PIL import Image, ImageDraw
+import cv2
 import tflite_runtime.interpreter as tflite
 
 from picamera2 import Picamera2, Preview
@@ -31,17 +32,20 @@ if __name__ == "__main__":
   parser.add_argument(
       "-i",
       "--image",
-      default="../images/bus.jpg",
       help="Input image")
+  parser.add_argument(
+      "-v",
+      "--video",
+      help="Input video")
   parser.add_argument(
       "-m",
       "--model_file",
-      default="../models/yolov8n_224_int8.tflite",
+      default="models/yolov8n_int8.tflite",
       help="TF Lite model to be executed")
   parser.add_argument(
       "-l",
       "--label_file",
-      default="../models/yolov8_labels.txt",
+      default="models/yolov8_labels.txt",
       help="name of file containing labels")
   parser.add_argument(
       "--input_mean",
@@ -54,11 +58,11 @@ if __name__ == "__main__":
   parser.add_argument(
       "--num_threads", default=2, type=int, help="number of threads")
   parser.add_argument(
-      "--camera", default=None, type=int, help="Pi camera device to use")
+      "--camera", type=int, help="Pi camera device to use")
   parser.add_argument(
       "--save_input", default=None, help="Image file to save model input to")
   parser.add_argument(
-      "--save_output", default=None, help="Image file to save model output to")
+      "--save_output", default="output.png", help="Image file to save model output to")
   parser.add_argument(
       "--score_threshold",
       default=0.6, type=float,
@@ -197,14 +201,12 @@ if __name__ == "__main__":
       box[2] = int(center_x + half_w)
       box[1] = int(center_y - half_h)
       box[3] = int(center_y + half_h)
+      box[4] = box[5]
     
-    if len(clean_boxes) != 0:
-      dets = np.array(clean_boxes).reshape(-1, 6)
-    else:
-      dets = np.zeros((0, 5))
+    dets = np.array(clean_boxes).reshape(-1, 6)
 
     print(dets)
-    boxes = tracker.update(dets[:,:5]).tolist()
+    boxes = tracker.update(dets).tolist()
 
     for i in range(len(boxes)):
       box = boxes[i]
@@ -214,9 +216,9 @@ if __name__ == "__main__":
       top_y = box[3]
       center_x = (left_x + right_x)/2
       center_y = (bottom_y + top_y)/2
-      id = box[4]
-      class_index = clean_boxes[i][5]
+      class_index = int(box[4])
       class_label = class_labels[class_index]
+      id = box[5]
       print(
           f"{class_label}: {id} ({center_x:.0f}, {center_y:.0f})")
       if args.save_output is not None:
