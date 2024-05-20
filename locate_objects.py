@@ -85,6 +85,9 @@ if __name__ == "__main__":
     picam2.configure(config)
 
     picam2.start()
+  elif args.video is not None:
+    cap = cv2.VideoCapture(args.video)
+    fps = int(cap.get(cv2.CAP_PROP_FPS))
 
   tracker = Sort()
 
@@ -129,9 +132,21 @@ if __name__ == "__main__":
           (class_count, len(class_labels)))
     exit(0)
 
+  left_to_right = {}
+  right_to_left = {}
+  id_pos = {}
+
   while True:
     if args.camera is None:
-      img = Image.open(args.image).resize((input_width, input_height))
+      if args.video is None:
+        img = Image.open(args.image).resize((input_width, input_height))
+      else:
+        suc, img = cap.read()
+        if not suc:
+          break
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        img = Image.fromarray(img).resize(
+          size=(input_width, input_height), resample=Image.Resampling.LANCZOS)
     else:
       img = Image.fromarray(picam2.capture_array()).resize(
           size=(input_width, input_height), resample=Image.Resampling.LANCZOS)
@@ -189,6 +204,18 @@ if __name__ == "__main__":
 
     if args.save_output is not None:
       img_draw = ImageDraw.Draw(img)
+      print(left_to_right)
+      print(right_to_left)
+      y = 10
+      img_draw.text((0, 0), "left to right:")
+      for key, value in left_to_right.items():
+        img_draw.text((0, y), f"{key}: {value}")
+        y += 10
+      y = 10
+      img_draw.text((130, 0), "right to left:")
+      for key, value in right_to_left.items():
+        img_draw.text((130, y), f"{key}: {value}")
+        y += 10
 
     for box in clean_boxes:
       center_x = box[0] * input_width
@@ -219,8 +246,27 @@ if __name__ == "__main__":
       class_index = int(box[4])
       class_label = class_labels[class_index]
       id = box[5]
+      if center_x < input_width/2:
+        cur_pos = "left"
+      else:
+        cur_pos = "right"
+      
+      if id in id_pos:
+        if id_pos[id] == "left" and cur_pos == "right":
+          if class_label in left_to_right:
+            left_to_right[class_label] += 1
+          else:
+            left_to_right[class_label] = 1
+        elif id_pos[id] == "right" and cur_pos == "left":
+          if class_label in right_to_left:
+            right_to_left[class_label] += 1
+          else:
+            right_to_left[class_label] = 1
+      
+      id_pos[id] = cur_pos
+
       print(
-          f"{class_label}: {id} ({center_x:.0f}, {center_y:.0f})")
+          f"{class_label}: {id} ({center_x:.0f}, {center_y:.0f}) {cur_pos}")
       if args.save_output is not None:
         img_draw.rectangle(((left_x, top_y), (right_x, bottom_y)), fill=None)
         img_draw.text((center_x, center_y), f"{class_label} {id}")
@@ -247,5 +293,5 @@ if __name__ == "__main__":
     stop_time = time.time()
     print("time: {:.3f}ms".format((stop_time - start_time) * 1000))
 
-    if args.camera is None:
+    if args.camera is None and args.video is None:
       break
