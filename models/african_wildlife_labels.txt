@@ -1,4 +1,0 @@
-buffalo
-elephant
-rhino
-zebra

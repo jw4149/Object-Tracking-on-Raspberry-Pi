@@ -136,6 +136,11 @@ if __name__ == "__main__":
   right_to_left = {}
   id_pos = {}
 
+  video_writer = cv2.VideoWriter("object_counting_output.mp4",
+                       cv2.VideoWriter_fourcc(*'mp4v'),
+                       15,
+                       (input_width, input_height))
+
   while True:
     if args.camera is None:
       if args.video is None:
@@ -288,6 +293,7 @@ if __name__ == "__main__":
 
     if args.save_output is not None:
       img.save("new_" + args.save_output)
+      video_writer.write(cv2.UMat(cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)))
       shutil.move("new_" + args.save_output, args.save_output)
 
     stop_time = time.time()
