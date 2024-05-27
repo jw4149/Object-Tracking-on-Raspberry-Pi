@@ -13,14 +13,10 @@ from picamera2 import Picamera2, Preview
 from nms import non_max_suppression_yolov8
 
 from sort import Sort
+from tabulate import tabulate  # Add tabulate import
 
 # How many coordinates are present for each box.
 BOX_COORD_NUM = 4
-
-# How to draw a skeleton from the keypoints.
-POSE_LINES = [[0, 1], [0, 2], [1, 2], [1, 3], [2, 4], [3, 5], [4, 6], [5, 6], [5, 7], [
-    5, 11], [6, 8], [6, 12], [7, 9], [8, 10], [11, 12], [13, 11], [14, 12], [15, 13], [16, 14]]
-
 
 def load_labels(filename):
   with open(filename, "r") as f:
@@ -58,6 +54,7 @@ if __name__ == "__main__":
   parser.add_argument(
       "--num_threads", default=2, type=int, help="number of threads")
   parser.add_argument(
+      "-c", 
       "--camera", type=int, help="Pi camera device to use")
   parser.add_argument(
       "--save_input", default=None, help="Image file to save model input to")
@@ -70,7 +67,11 @@ if __name__ == "__main__":
   parser.add_argument(
       "--output_format",
       default="yolov8_detect",
-      help="How to interpret the output from the model"
+      help="How to interpret the output from the model")
+  parser.add_argument(
+      "--save_video", 
+      default="object_counting_output.mp4", 
+      help="Video file to save model output"
   )
 
   args = parser.parse_args()
@@ -83,7 +84,6 @@ if __name__ == "__main__":
         "format": "BGR888"
     })
     picam2.configure(config)
-
     picam2.start()
   elif args.video is not None:
     cap = cv2.VideoCapture(args.video)
@@ -113,16 +113,6 @@ if __name__ == "__main__":
   if args.output_format == "yolov8_detect":
     class_count = output_details[0]["shape"][1] - BOX_COORD_NUM
     keypoint_count = 0
-  elif args.output_format == "yolov8_pose":
-    class_count = 1
-    box_num_values = output_details[0]["shape"][1]
-    non_keypoint_values = (BOX_COORD_NUM + 1)
-    keypoint_values = box_num_values - non_keypoint_values
-    if (keypoint_values % 3) != 0:
-      print(
-          f"Unexpected number of values {keypoint_values} for format {args.output_format}")
-      exit(0)
-    keypoint_count = int(keypoint_values / 3)
   else:
     print(f"Unknown output format {args.output_format}")
     exit(0)
@@ -134,12 +124,14 @@ if __name__ == "__main__":
 
   left_to_right = {}
   right_to_left = {}
-  id_pos = {}
+  # id_pos = {}
+  id_initial_pos = {}
+  id_final_pos = {} 
 
-  video_writer = cv2.VideoWriter("object_counting_output.mp4",
-                       cv2.VideoWriter_fourcc(*'mp4v'),
-                       15,
-                       (input_width, input_height))
+  video_writer = cv2.VideoWriter(args.save_video,
+                      cv2.VideoWriter_fourcc(*'mp4v'),
+                      15,
+                      (input_width, input_height))
 
   while True:
     if args.camera is None:
@@ -176,13 +168,6 @@ if __name__ == "__main__":
     output_data = interpreter.get_tensor(output_details[0]["index"])
     results = np.squeeze(output_data).transpose()
 
-    # The detect output format is [x, y, width, height, class 0 score, class 1
-    # score, ..., class n score]. So, if there are 80 classes, each box will be
-    # an array containing 84 values (4 coords plus the 80 class scores).
-    # The pose output format is similar, but instead of the class scores it has
-    # a single score followed by n triples of keypoint coordinates. So if a box
-    # has 17 keypoints, it will have 4 coords, plus one class score, plus 51
-    # (17 * 3) keypoint coordinates, for 56 values in total.
     boxes = []
     for i in range(max_box_count):
       raw_box = results[i]
@@ -196,21 +181,17 @@ if __name__ == "__main__":
           if (score > args.score_threshold):
             boxes.append([center_x, center_y, w, h, score, index])
       else:
-        score = raw_box[BOX_COORD_NUM]
-        if (score > args.score_threshold):
-          coords = [center_x, center_y, w, h, score, 0]
-          keypoints = raw_box[BOX_COORD_NUM + 1:]
-          boxes.append([*coords, *keypoints])
+        print(f"Unknown output format {args.output_format}")
 
-    # Clean up overlapping boxes. See
+    # Clean up overlapping boxes. Reference:
     # https://petewarden.com/2022/02/21/non-max-suppressions-how-do-they-work/
     clean_boxes = non_max_suppression_yolov8(
         boxes, class_count, keypoint_count)
 
     if args.save_output is not None:
       img_draw = ImageDraw.Draw(img)
-      print(left_to_right)
-      print(right_to_left)
+      # print(left_to_right)
+      # print(right_to_left)
       y = 10
       img_draw.text((0, 0), "left to right:")
       for key, value in left_to_right.items():
@@ -236,8 +217,7 @@ if __name__ == "__main__":
       box[4] = box[5]
     
     dets = np.array(clean_boxes).reshape(-1, 6)
-
-    print(dets)
+    # print(dets)
     boxes = tracker.update(dets).tolist()
 
     for i in range(len(boxes)):
@@ -250,54 +230,48 @@ if __name__ == "__main__":
       center_y = (bottom_y + top_y)/2
       class_index = int(box[4])
       class_label = class_labels[class_index]
-      id = box[5]
-      if center_x < input_width/2:
-        cur_pos = "left"
-      else:
-        cur_pos = "right"
-      
-      if id in id_pos:
-        if id_pos[id] == "left" and cur_pos == "right":
-          if class_label in left_to_right:
-            left_to_right[class_label] += 1
-          else:
-            left_to_right[class_label] = 1
-        elif id_pos[id] == "right" and cur_pos == "left":
-          if class_label in right_to_left:
-            right_to_left[class_label] += 1
-          else:
-            right_to_left[class_label] = 1
-      
-      id_pos[id] = cur_pos
+      obj_id = box[5]
 
-      print(
-          f"{class_label}: {id} ({center_x:.0f}, {center_y:.0f}) {cur_pos}")
+      # Store initial positions
+      if obj_id not in id_initial_pos:
+          id_initial_pos[obj_id] = (center_x, center_y)
+      id_final_pos[obj_id] = (center_x, center_y)
+
       if args.save_output is not None:
-        img_draw.rectangle(((left_x, top_y), (right_x, bottom_y)), fill=None)
-        img_draw.text((center_x, center_y), f"{class_label} {id}")
-        if args.output_format == "yolov8_pose":
-          for line in POSE_LINES:
-            start_index = 6 + (line[0] * 3)
-            end_index = 6 + (line[1] * 3)
-            start_x = box[start_index + 0]
-            start_y = box[start_index + 1]
-            end_x = box[end_index + 0]
-            end_y = box[end_index + 1]
-            img_draw.line((start_x, start_y, end_x, end_y), fill="yellow")
-          for i in range(keypoint_count):
-            index = 6 + (i * 3)
-            k_x = box[index + 0]
-            k_y = box[index + 1]
-            img_draw.arc((k_x - 1, k_y - 1, k_x + 1, k_y + 1),
-                         start=0, end=360, fill="red")
+          img_draw.rectangle(((left_x, top_y), (right_x, bottom_y)), fill=None)
+          img_draw.text((center_x, center_y), f"{class_label} {obj_id}")
+
+    # Remove IDs that are no longer detected
+    tracked_ids = set(box[5] for box in boxes)
+    for obj_id in list(id_initial_pos.keys()):
+        if obj_id not in tracked_ids:
+            initial_pos = id_initial_pos.pop(obj_id)
+            final_pos = id_final_pos.pop(obj_id)
+            initial_x, _ = initial_pos
+            final_x, _ = final_pos
+            if final_x > initial_x:
+                left_to_right[class_label] = left_to_right.get(class_label, 0) + 1
+            elif final_x < initial_x:
+                right_to_left[class_label] = right_to_left.get(class_label, 0) + 1
 
     if args.save_output is not None:
       img.save("new_" + args.save_output)
       video_writer.write(cv2.UMat(cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)))
       shutil.move("new_" + args.save_output, args.save_output)
 
+    print("\n\n")
+    # Print left_to_right and right_to_left in a table format
+    table_data = [["Class", "Left to Right", "Right to Left"]]
+    all_classes = set(left_to_right.keys()).union(set(right_to_left.keys()))
+    for cls in all_classes:
+        left_count = left_to_right.get(cls, 0)
+        right_count = right_to_left.get(cls, 0)
+        table_data.append([cls, left_count, right_count])
+
     stop_time = time.time()
-    print("time: {:.3f}ms".format((stop_time - start_time) * 1000))
+    table_data.append(["Time: {:.3f} [ms]".format((stop_time - start_time) * 1000), "", ""])
+    print(tabulate(table_data, headers="firstrow"))
+    # print("time: {:.3f}ms".format((stop_time - start_time) * 1000))
 
     if args.camera is None and args.video is None:
       break
