@@ -1,0 +1,10 @@
+opencv-python
+ultralytics
+picamera2
+Pillow
+numpy
+tflite-runtime
+filterpy
+numba
+scipy
+tabulate
