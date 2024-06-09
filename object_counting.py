@@ -1,6 +1,9 @@
 import argparse
 import shutil
 import time
+import signal
+import sys
+import pandas as pd # for report
 from collections import deque
 
 import numpy as np
@@ -14,6 +17,10 @@ from nms import non_max_suppression_yolov8
 
 from sort import Sort
 from tabulate import tabulate
+
+# Suppress specific numpy warnings
+# import warnings
+# warnings.filterwarnings("ignore", category=UserWarning, module="numpy.core.getlimits")
 
 # How many coordinates are present for each box.
 BOX_COORD_NUM = 4
@@ -34,6 +41,22 @@ def draw_fading_trajectory(draw, trajectory, color, fade_length=20):
 def get_color_mapping(class_labels):
     np.random.seed(42)  # Ensure reproducibility
     return {label: tuple(np.random.randint(0, 256, 3)) for label in class_labels}
+
+def signal_handler(args, start_time, frame_times, sig, frame):
+    print('Interrupted! Exiting gracefully...')
+    print("Arguments:")
+    for arg in vars(args):
+        print(f"{arg}: {getattr(args, arg)}")
+
+
+    # Save log to Excel file
+    if args.testing == "yes" or "Yes" or "YES" or "y" or "Y":
+        data = {'Frame Time (s)': frame_times}
+        df = pd.DataFrame(data)
+        df['Frame Rate (fps)'] = 1 / df['Frame Time (s)']
+        df.to_excel("frame_rate_log.xlsx", index=False)
+
+    sys.exit(0)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -66,8 +89,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--num_threads", default=2, type=int, help="number of threads")
     parser.add_argument(
-        "-c", 
-        "--camera", type=int, help="Pi camera device to use")
+        "--camera", default=0, type=int, help="Pi camera device to use")
     parser.add_argument(
         "--save_input", default=None, help="Image file to save model input to")
     parser.add_argument(
@@ -82,8 +104,13 @@ if __name__ == "__main__":
         help="How to interpret the output from the model")
     parser.add_argument(
         "--save_video", 
-        default="object_counting_output.mp4", 
+        default=None, 
         help="Video file to save model output")
+    parser.add_argument(
+        "--testing", 
+        default=0,
+        type=int,
+        help="Testing time in seconds for analysis")
     parser.add_argument(
         "--resize",
         default=None,
@@ -92,6 +119,11 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
+    start_time = time.time()
+    frame_times = []
+
+    signal.signal(signal.SIGINT, lambda sig, frame: signal_handler(args, start_time, frame_times, sig, frame))
+
 
     if args.camera is not None:
         picam2 = Picamera2(camera_num=args.camera)
@@ -152,15 +184,19 @@ if __name__ == "__main__":
         input_width_show = input_width * args.resize
         input_height_show = input_width * args.resize
         
-    
-    video_writer = cv2.VideoWriter(args.save_video,
-                                   cv2.VideoWriter_fourcc(*'mp4v'),
-                                   15,
-                                   (input_width_show, input_height_show))  # Double the size
+    if args.save_video is not None:
+        video_name = "object_counting_output_" + args.save_video + ".mp4"
+
+        video_writer = cv2.VideoWriter(video_name,
+                                    cv2.VideoWriter_fourcc(*'mp4v'),
+                                    15,
+                                    (input_width_show, input_height_show))  # Double the size
 
     vertical_line_x = (input_width_show) // 2  # Double the size
 
     while True:
+        frame_start_time = time.time()
+
         if args.camera is None:
             if args.video is None:
                 img = Image.open(args.image).resize((input_width_show, input_height_show))
@@ -190,7 +226,6 @@ if __name__ == "__main__":
 
         interpreter.set_tensor(input_details[0]["index"], input_data)
 
-        start_time = time.time()
         interpreter.invoke()
 
         output_data = interpreter.get_tensor(output_details[0]["index"])
@@ -211,9 +246,37 @@ if __name__ == "__main__":
             else:
                 print(f"Unknown output format {args.output_format}")
 
+        print("\n\n")
+        table_data = [["Class", "Left to Right", "Right to Left"]]
+        all_classes = set([v for k, v in left_to_right.items()]).union(set([v for k, v in right_to_left.items()]))
+        
+        y_l = y_r = 10
+        if args.save_output is not None:
+            # Print object counts on the image
+            img_draw = ImageDraw.Draw(img)
+            img_draw.text((0, 0), "left to right:")
+            img_draw.text((130, 0), "right to left:")
+
+        for cls in all_classes:
+            left_count = sum(1 for v in left_to_right.values() if v == cls)
+            right_count = sum(1 for v in right_to_left.values() if v == cls)
+            table_data.append([cls, left_count, right_count])
+
+            if args.save_output is not None:
+                # print(left_to_right)
+                if left_count > 0:
+                    # right_count = sum(1 for v in right_to_left.values() if v == cls)
+                    img_draw.text((0, y_l), f"{cls}: {left_count}")
+                    y_l += 10
+                # print(right_to_left)  
+                if right_count > 0:
+                    # right_count = sum(1 for v in right_to_left.values() if v == cls)
+                    img_draw.text((130, y_r), f"{cls}: {right_count}")
+                    y_r += 10
+
         clean_boxes = non_max_suppression_yolov8(
             boxes, class_count, keypoint_count)
-
+            
         for box in clean_boxes:
             center_x = box[0] * (input_width_show)
             center_y = box[1] * (input_height_show)
@@ -271,20 +334,37 @@ if __name__ == "__main__":
 
         if args.save_output is not None:
             img.save("new_" + args.save_output)
-            video_writer.write(cv2.UMat(cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)))
+            if args.save_video is not None:
+                video_writer.write(cv2.UMat(cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)))
+                video_writer.write(cv2.UMat(np.array(img)))
             shutil.move("new_" + args.save_output, args.save_output)
 
-        print("\n\n")
-        table_data = [["Class", "Left to Right", "Right to Left"]]
-        all_classes = set([v for k, v in left_to_right.items()]).union(set([v for k, v in right_to_left.items()]))
-        for cls in all_classes:
-            left_count = sum(1 for v in left_to_right.values() if v == cls)
-            right_count = sum(1 for v in right_to_left.values() if v == cls)
-            table_data.append([cls, left_count, right_count])
+        frame_end_time = time.time()
+        frame_time = frame_end_time - frame_start_time
 
-        stop_time = time.time()
-        table_data.append(["Time: {:.3f} [ms]".format((stop_time - start_time) * 1000), "", ""])
+        if args.testing != 0:
+            runtime = frame_end_time - start_time
+            frame_times.append(frame_time)
+            print(runtime, len(frame_times))
+            # if  runtime >= args.testing:
+            if  len(frame_times) >= args.testing:
+                break
+
+        table_data.append(["Time: {:.3f} [ms]".format(frame_time * 1000), "", ""])
         print(tabulate(table_data, headers="firstrow"))
 
         if args.camera is None and args.video is None:
             break
+
+    if args.testing != 0:
+        # Calculate frame rate
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+        frame_rate = len(frame_times) / elapsed_time
+        print(f"Average frame rate: {frame_rate:.2f} frames per second")
+
+        # Save log to Excel file
+        data = {'Frame Time (s)': frame_times}
+        df = pd.DataFrame(data)
+        df['Frame Rate (fps)'] = 1 / df['Frame Time (s)']
+        df.to_excel("doc/frame_rate_log_ours.xlsx", index=False)
