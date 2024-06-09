@@ -1,14 +1,15 @@
-# Object Detection and Tracking with YOLOv8 and SORT
+# Object Detection and Tracking with YOLOv8 and SORT on Raspberry Pi
 
-This project involves object detection and tracking using YOLOv8 for detection and SORT for tracking. The implementation is designed for both video files and live camera feeds for baseline method, and so far live camera feed only for SORT method.
+This project involves object detection and tracking using YOLOv8 for detection and SORT for tracking. The implementation is for live camera feed for both baseline method and our method.
 
 ## Prerequisites
 
-- Python 3.8 or later
+- Tested on Python 3.11.2
 - Ensure you have the necessary dependencies installed by running:
   ```bash
   pip install -r requirements.txt
   ```
+- Refer to reference section for understaning how the model is trained.
 
 ## Files
 
@@ -19,28 +20,10 @@ This project involves object detection and tracking using YOLOv8 for detection a
 - `sort.py`: Implementation of the SORT tracking algorithm.
 - `models/yolov8_labels.txt`: Labels for the YOLOv8 model.
 - `models/yolov8n_int8.tflite`: Quantized YOLOv8 model in TFLite format.
+- `doc/plot_frame_rate.py`: Testing script for analysing and comparing results.
 
 ## Usage
-
-### Baseline Method For Video Files
-
-1. Place your video file in the working directory.
-2. Run the `baseline.py` script:
-   ```bash
-   python baseline.py
-   ```
-
-### Baseline Method For Live Camera Feed
-
-1. Ensure your camera is connected.
-2. Run the `baseline_cam.py` script:
-   ```bash
-   python baseline_cam.py
-   ```
-
-### Our Method For Live Camera Object Counting
-
-1. Ensure your camera is connected. Check the camera by running:
+Ensure your camera is connected. Check the camera by running:
 ```bash
 rpicam-hello --list-cameras
 ```
@@ -60,7 +43,50 @@ Available cameras
                       1920x1080 [47.57 fps - (680, 692)/1920x1080 crop]
                       3280x2464 [21.19 fps - (0, 0)/3280x2464 crop]
 ```
-2. Run the script with the desired parameters:
+The default uses camera = 0
+
+### Baseline Method For Live Camera Feed
+
+Run the `baseline_cam.py` script:
    ```bash
-   python object_counting.py --camera=0
+   python baseline_cam.py
    ```
+
+### Our Method For Live Camera Object Counting
+
+ Run the `object_counting.py` script:
+   ```bash
+   python object_counting.py
+   ```
+
+## Reference
+### GitHub Repositories
+- [SORT (Simple Online and Realtime Tracking)](https://github.com/abewley/sort): This repository provides the implementation of the SORT algorithm used for object tracking in our project.
+- [EE292D Lab 3](https://github.com/ee292d/labs/tree/main/lab3): This repository contains the trained model and some code we used in our project.
+
+### Paper
+For more details on the SORT algorithm, please refer to the following paper:
+> **Simple Online and Realtime Tracking**  
+> Alex Bewley, ZongYuan Ge, Lionel Ott, Fabio Ramos, Ben Upcroft  
+> _CoRR, abs/1602.00763, 2016_  
+> [arXiv link](http://arxiv.org/abs/1602.00763)
+
+Here is the full citation in BibTeX format:
+```bibtex
+@article{DBLP:journals/corr/BewleyGORU16,
+  author       = {Alex Bewley and
+                  ZongYuan Ge and
+                  Lionel Ott and
+                  Fabio Ramos and
+                  Ben Upcroft},
+  title        = {Simple Online and Realtime Tracking},
+  journal      = {CoRR},
+  volume       = {abs/1602.00763},
+  year         = {2016},
+  url          = {http://arxiv.org/abs/1602.00763},
+  eprinttype    = {arXiv},
+  eprint       = {1602.00763},
+  timestamp    = {Tue, 18 Oct 2022 08:35:41 +0200},
+  biburl       = {https://dblp.org/rec/journals/corr/BewleyGORU16.bib},
+  bibsource    = {dblp computer science bibliography, https://dblp.org}
+}
