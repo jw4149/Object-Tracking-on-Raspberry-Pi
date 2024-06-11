@@ -1,0 +1,12 @@
+argparse
+signal
+sys
+pandas
+time
+ultralytics
+picamera2
+Pillow
+opencv-python
+numpy
+tflite-runtime
+tabulate
